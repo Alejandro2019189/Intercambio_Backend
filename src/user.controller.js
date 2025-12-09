@@ -1,8 +1,6 @@
-// src/user.controller.js
 import { validationResult } from "express-validator";
 import userModel from "./user.model.js";
 
-// CREAR PERSONA (nombre + familia)
 export const createUser = async (req, res) => {
   try {
     const errors = validationResult(req);
@@ -10,12 +8,15 @@ export const createUser = async (req, res) => {
       return res.status(400).json({ errors: errors.array() });
     }
 
-    const { nombre, familia } = req.body;
+    const { nombre, familia, pin } = req.body;
 
     const nombreLimpio = nombre.trim();
     const familiaLimpia = familia.trim();
 
-    // evitar duplicados
+    const pinGenerico =
+      (pin && pin.toString().trim()) ||
+      Math.floor(1000 + Math.random() * 9000).toString();
+
     const existe = await userModel.findOne({ nombre: nombreLimpio });
     if (existe) {
       return res.status(400).send("Ya existe una persona con ese nombre.");
@@ -24,18 +25,23 @@ export const createUser = async (req, res) => {
     const nuevaPersona = new userModel({
       nombre: nombreLimpio,
       familia: familiaLimpia,
+      pin: pinGenerico
     });
 
     await nuevaPersona.save();
 
-    return res.status(200).send("Persona creada con éxito.");
+    return res.status(200).json({
+      message: "Persona creada con éxito.",
+      nombre: nuevaPersona.nombre,
+      familia: nuevaPersona.familia,
+      pin: nuevaPersona.pin
+    });
   } catch (e) {
     console.log(e);
     return res.status(500).send("No se puede crear la persona.");
   }
 };
 
-// ASIGNAR PERSONA (no de la misma familia)
 export const assignPerson = async (req, res) => {
   try {
     const errors = validationResult(req);
@@ -43,12 +49,18 @@ export const assignPerson = async (req, res) => {
       return res.status(400).json({ errors: errors.array() });
     }
 
-    const { nombre } = req.body;
+    const { nombre, pin } = req.body;
+    const nombreLimpio = nombre.trim();
+    const pinLimpio = pin.trim();
 
-    const persona = await userModel.findOne({ nombre: nombre.trim() });
+    const persona = await userModel.findOne({ nombre: nombreLimpio });
 
     if (!persona) {
       return res.status(404).send("No se encontró a la persona.");
+    }
+
+    if (persona.pin !== pinLimpio) {
+      return res.status(401).send("PIN incorrecto.");
     }
 
     if (!persona.familia) {
@@ -59,25 +71,22 @@ export const assignPerson = async (req, res) => {
         );
     }
 
-    // si ya tenía asignación, devolver la misma
     if (persona.asignadoA) {
       const yaAsignado = await userModel.findById(persona.asignadoA);
       return res.json({
         message: "Ya tenías una persona asignada.",
         asignadoA: {
           nombre: yaAsignado?.nombre,
-          familia: yaAsignado?.familia,
-        },
+          familia: yaAsignado?.familia
+        }
       });
     }
 
-    // candidatos base
     const posibles = await userModel.find({
       _id: { $ne: persona._id },
-      fueAsignado: false,
+      fueAsignado: false
     });
 
-    // filtro por otra familia
     const candidatos = posibles.filter(
       (c) => c.familia && c.familia !== persona.familia
     );
@@ -85,7 +94,7 @@ export const assignPerson = async (req, res) => {
     if (!candidatos.length) {
       return res.status(400).json({
         message:
-          "No hay personas disponibles que no sean de tu mismo grupo familiar.",
+          "No hay personas disponibles que no sean de tu mismo grupo familiar."
       });
     }
 
@@ -96,7 +105,6 @@ export const assignPerson = async (req, res) => {
       return res.status(500).send("Error en la validación de familias.");
     }
 
-    // guardar asignación
     persona.asignadoA = elegido._id;
     await persona.save();
 
@@ -107,8 +115,8 @@ export const assignPerson = async (req, res) => {
       message: "Persona asignada correctamente.",
       asignadoA: {
         nombre: elegido.nombre,
-        familia: elegido.familia,
-      },
+        familia: elegido.familia
+      }
     });
   } catch (e) {
     console.log(e);
@@ -120,7 +128,6 @@ export const getAssignments = async (req, res) => {
   try {
     console.log("GET /intercambio/resumen");
 
-    // Traemos todos los usuarios y populamos la persona asignada
     const users = await userModel
       .find()
       .populate("asignadoA", "nombre familia");
@@ -128,12 +135,13 @@ export const getAssignments = async (req, res) => {
     const resultado = users.map((u) => ({
       nombre: u.nombre,
       familia: u.familia,
+      pin: u.pin,
       asignadoA: u.asignadoA
         ? {
             nombre: u.asignadoA.nombre,
-            familia: u.asignadoA.familia,
+            familia: u.asignadoA.familia
           }
-        : null,
+        : null
     }));
 
     return res.json(resultado);

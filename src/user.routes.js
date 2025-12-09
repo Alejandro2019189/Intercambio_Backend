@@ -1,6 +1,10 @@
 import { Router } from "express";
 import { check } from "express-validator";
-import { createUser, assignPerson, getAssignments  } from "./user.controller.js";
+import {
+  createUser,
+  assignPerson,
+  getAssignments
+} from "./user.controller.js";
 
 const router = Router();
 
@@ -15,13 +19,13 @@ router.post(
 
 router.post(
   "/asignar",
-  [check("nombre", "El nombre es requerido").not().isEmpty()],
+  [
+    check("nombre", "El nombre es requerido").not().isEmpty(),
+    check("pin", "El PIN es requerido").not().isEmpty()
+  ],
   assignPerson
 );
 
-router.get(
-  "/resumen",
-  getAssignments
-);
+router.get("/resumen", getAssignments);
 
 export default router;

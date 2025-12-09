@@ -12,6 +12,10 @@ const userIntercambioSchema = new mongoose.Schema({
     required: true,
     trim: true
   },
+  pin: {
+    type: String,
+    required: true
+  },
   asignadoA: {
     type: mongoose.Schema.Types.ObjectId,
     ref: "userIntercambio",
