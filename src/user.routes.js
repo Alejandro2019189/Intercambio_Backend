@@ -3,6 +3,7 @@ import { check } from "express-validator";
 import {
   createUser,
   assignPerson,
+  generateGlobalAssignments,
   getAssignments
 } from "./user.controller.js";
 
@@ -25,6 +26,8 @@ router.post(
   ],
   assignPerson
 );
+
+router.post("/generar", generateGlobalAssignments);
 
 router.get("/resumen", getAssignments);
 

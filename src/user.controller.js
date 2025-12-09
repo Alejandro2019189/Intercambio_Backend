@@ -25,7 +25,7 @@ export const createUser = async (req, res) => {
     const nuevaPersona = new userModel({
       nombre: nombreLimpio,
       familia: familiaLimpia,
-      pin: pinGenerico
+      pin: pinGenerico,
     });
 
     await nuevaPersona.save();
@@ -34,7 +34,7 @@ export const createUser = async (req, res) => {
       message: "Persona creada con éxito.",
       nombre: nuevaPersona.nombre,
       familia: nuevaPersona.familia,
-      pin: nuevaPersona.pin
+      pin: nuevaPersona.pin,
     });
   } catch (e) {
     console.log(e);
@@ -63,71 +63,122 @@ export const assignPerson = async (req, res) => {
       return res.status(401).send("PIN incorrecto.");
     }
 
-    if (!persona.familia) {
+    if (!persona.asignadoA) {
       return res
         .status(400)
-        .send(
-          "Esta persona no tiene grupo familiar asignado. Contacta al organizador."
-        );
+        .send("Aún no se ha generado el intercambio. Contacta al organizador.");
     }
 
-    if (persona.asignadoA) {
-      const yaAsignado = await userModel.findById(persona.asignadoA);
-      return res.json({
-        message: "Ya tenías una persona asignada.",
-        asignadoA: {
-          nombre: yaAsignado?.nombre,
-          familia: yaAsignado?.familia
-        }
-      });
-    }
-
-    const posibles = await userModel.find({
-      _id: { $ne: persona._id },
-      fueAsignado: false
-    });
-
-    const candidatos = posibles.filter(
-      (c) => c.familia && c.familia !== persona.familia
+    const personaConAsignado = await persona.populate(
+      "asignadoA",
+      "nombre familia"
     );
 
-    if (!candidatos.length) {
-      return res.status(400).json({
-        message:
-          "No hay personas disponibles que no sean de tu mismo grupo familiar."
-      });
-    }
-
-    const indice = Math.floor(Math.random() * candidatos.length);
-    const elegido = candidatos[indice];
-
-    if (elegido.familia === persona.familia) {
-      return res.status(500).send("Error en la validación de familias.");
-    }
-
-    persona.asignadoA = elegido._id;
-    await persona.save();
-
-    elegido.fueAsignado = true;
-    await elegido.save();
-
     return res.json({
-      message: "Persona asignada correctamente.",
+      message: "Persona asignada para ti.",
       asignadoA: {
-        nombre: elegido.nombre,
-        familia: elegido.familia
-      }
+        nombre: personaConAsignado.asignadoA.nombre,
+        familia: personaConAsignado.asignadoA.familia,
+      },
     });
   } catch (e) {
     console.log(e);
-    return res.status(500).send("Error al asignar persona.");
+    return res.status(500).send("Error al obtener tu persona asignada.");
+  }
+};
+
+function shuffle(array) {
+  for (let i = array.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [array[i], array[j]] = [array[j], array[i]];
+  }
+}
+
+export const generateGlobalAssignments = async (req, res) => {
+  try {
+    await userModel.updateMany({}, { asignadoA: null, fueAsignado: false });
+
+    const users = await userModel.find();
+
+    if (users.length < 2) {
+      return res.status(400).json({
+        message: "Se necesitan al menos 2 personas para generar el intercambio.",
+      });
+    }
+
+    shuffle(users);
+
+    const n = users.length;
+    const usedRecipients = new Set(); 
+    const assignmentMap = new Map(); 
+
+    const backtrack = (index) => {
+      if (index === n) return true;
+
+      const giver = users[index];
+      const giverId = giver._id.toString();
+
+      const indices = [...Array(n).keys()];
+      shuffle(indices);
+
+      for (let idx of indices) {
+        const candidate = users[idx];
+        const candidateId = candidate._id.toString();
+
+        if (candidateId === giverId) continue;
+
+        if (candidate.familia === giver.familia) continue;
+
+        if (usedRecipients.has(candidateId)) continue;
+
+        usedRecipients.add(candidateId);
+        assignmentMap.set(giverId, candidate);
+
+        const success = backtrack(index + 1);
+        if (success) return true;
+
+        usedRecipients.delete(candidateId);
+        assignmentMap.delete(giverId);
+      }
+
+      return false;
+    };
+
+    const success = backtrack(0);
+
+    if (!success) {
+      return res.status(400).json({
+        message:
+          "No se pudo generar una asignación válida. Revisa la distribución de familias (puede que sea imposible que todos den a otra familia).",
+      });
+    }
+
+    const savePromises = users.map((u) => {
+      const giverId = u._id.toString();
+      const recipient = assignmentMap.get(giverId);
+      if (!recipient) return Promise.resolve();
+
+      u.asignadoA = recipient._id;
+      u.fueAsignado = true;
+      return u.save();
+    });
+
+    await Promise.all(savePromises);
+
+    return res.json({
+      message: "Intercambio generado correctamente.",
+      totalPersonas: users.length,
+    });
+  } catch (e) {
+    console.log("Error al generar intercambio global:", e);
+    return res
+      .status(500)
+      .send("Error al generar el intercambio. Intenta de nuevo.");
   }
 };
 
 export const getAssignments = async (req, res) => {
   try {
-    console.log("GET /intercambio/resumen");
-
     const users = await userModel
       .find()
       .populate("asignadoA", "nombre familia");
@@ -139,9 +190,9 @@ export const getAssignments = async (req, res) => {
       asignadoA: u.asignadoA
         ? {
             nombre: u.asignadoA.nombre,
-            familia: u.asignadoA.familia
+            familia: u.asignadoA.familia,
           }
-        : null
+        : null,
     }));
 
     return res.json(resultado);
